@@ -234,7 +234,7 @@ void GfxWindowBackendSDL2::SetFullscreenImpl(bool on, bool call_callback) {
         }
     }
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(__IOS__)
     // Implement fullscreening with native macOS APIs
     if (on != isNativeMacOSFullscreenActive(mWnd)) {
         toggleNativeMacOSFullscreen(mWnd);
@@ -693,7 +693,7 @@ void GfxWindowBackendSDL2::HandleEvents() {
     }
 
     // resync fullscreen state
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(__IOS__)
     auto nextFullscreenState = isNativeMacOSFullscreenActive(mWnd);
     if (mFullScreen != nextFullscreenState) {
         mFullScreen = nextFullscreenState;

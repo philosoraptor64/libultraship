@@ -1,6 +1,6 @@
 #include "ship/audio/Audio.h"
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(__IOS__) // macOS only; iOS uses SDL
 #include "ship/audio/CoreAudioAudioPlayer.h"
 #endif
 
@@ -20,7 +20,7 @@ void Audio::InitAudioPlayer() {
             mAudioPlayer = std::make_shared<WasapiAudioPlayer>(this->mAudioSettings);
             break;
 #endif
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(__IOS__) // macOS only; iOS uses SDL
         case AudioBackend::COREAUDIO:
             mAudioPlayer = std::make_shared<CoreAudioAudioPlayer>(this->mAudioSettings);
             break;
@@ -45,7 +45,7 @@ void Audio::Init() {
 #ifdef _WIN32
     mAvailableAudioBackends->push_back(AudioBackend::WASAPI);
 #endif
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(__IOS__) // macOS only; iOS uses SDL
     mAvailableAudioBackends->push_back(AudioBackend::COREAUDIO);
 #endif
     mAvailableAudioBackends->push_back(AudioBackend::SDL);

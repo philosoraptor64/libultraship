@@ -1,12 +1,19 @@
 include(FetchContent)
 
 #=================== SDL2 ===================
+# SDL 2's UIKit backend predates the UIScene life cycle, which apps built
+# with the iOS 27 SDK must adopt or they are killed at launch. The patch adds
+# a scene delegate (SDLUIKitSceneDelegate) and creates windows on its scene.
+set(sdl2_scene_patch_file ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dependencies/patches/sdl2-uikit-scene-lifecycle.patch)
+set(sdl2_apply_patch_command ${CMAKE_COMMAND} -Dpatch_file=${sdl2_scene_patch_file} -Dwith_reset=TRUE -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dependencies/git-patch.cmake)
+
 find_package(SDL2 QUIET)
 if (NOT ${SDL2_FOUND})
     FetchContent_Declare(
         SDL2
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
         GIT_TAG release-2.32.10
+        PATCH_COMMAND ${sdl2_apply_patch_command}
         OVERRIDE_FIND_PACKAGE
     )
     FetchContent_MakeAvailable(SDL2)
