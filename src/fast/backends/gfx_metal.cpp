@@ -324,6 +324,10 @@ struct ShaderProgram* GfxRenderingAPIMetal::CreateAndLoadNewShader(const ShaderP
     prg->usedTextures[5] = cc_features.used_blend[1];
     prg->numInputs = cc_features.numInputs;
     prg->numFloats = numFloats;
+    prg->pipeline_descriptor = nullptr;
+    for (auto& variant : prg->pipeline_state_variants_no_color) {
+        variant = nullptr;
+    }
 
     bool createdPipelineState = false;
 
@@ -365,10 +369,13 @@ struct ShaderProgram* GfxRenderingAPIMetal::CreateAndLoadNewShader(const ShaderP
 
     LoadShader((struct ShaderProgram*)prg);
 
+    // Keep the descriptor (it retains the shader functions) so the
+    // color-write-masked variants can be created on first use.
+    prg->pipeline_descriptor = pipeline_descriptor;
+
     vertexFunc->release();
     fragmentFunc->release();
     library->release();
-    pipeline_descriptor->release();
     autorelease_pool->release();
 
     return (struct ShaderProgram*)prg;
@@ -464,6 +471,39 @@ void GfxRenderingAPIMetal::SetDepthTestAndMask(bool depth_test, bool depth_mask)
 
 void GfxRenderingAPIMetal::SetZmodeDecal(bool zmode_decal) {
     mCurrentZmodeDecal = zmode_decal;
+}
+
+void GfxRenderingAPIMetal::SetColorWriteMask(bool enable) {
+    // Off while the game draws into a color image redirected to the Z buffer
+    // (e.g. SSB64's per-camera depth clears). Without this the depth-clear
+    // rectangle lands in the color buffer as an opaque near-white fill.
+    mCurrentColorWrite = enable;
+}
+
+// Pipeline for the current shader with color writes masked off, created on
+// first use from the retained descriptor. Returns nullptr on failure.
+static MTL::RenderPipelineState* gfx_metal_no_color_pipeline(MTL::Device* device, ShaderProgramMetal* prg,
+                                                             int msaa_level) {
+    if (prg->pipeline_state_variants_no_color[msaa_level] != nullptr) {
+        return prg->pipeline_state_variants_no_color[msaa_level];
+    }
+    if (prg->pipeline_descriptor == nullptr) {
+        return nullptr;
+    }
+    MTL::RenderPipelineColorAttachmentDescriptor* color = prg->pipeline_descriptor->colorAttachments()->object(0);
+    color->setWriteMask(MTL::ColorWriteMaskNone);
+    prg->pipeline_descriptor->setSampleCount(msaa_level);
+    NS::Error* error = nullptr;
+    MTL::RenderPipelineState* state = device->newRenderPipelineState(prg->pipeline_descriptor, &error);
+    color->setWriteMask(MTL::ColorWriteMaskAll);
+    if (state == nullptr) {
+        SPDLOG_ERROR("Failed to create no-color pipeline state for shader_id0=0x{:016X} shader_id1=0x{:016X}: {}",
+                     prg->shader_id0, prg->shader_id1,
+                     error != nullptr ? error->localizedDescription()->cString(NS::UTF8StringEncoding) : "unknown");
+        return nullptr;
+    }
+    prg->pipeline_state_variants_no_color[msaa_level] = state;
+    return state;
 }
 
 void GfxRenderingAPIMetal::SetViewport(int x, int y, int width, int height) {
@@ -607,12 +647,29 @@ void GfxRenderingAPIMetal::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, si
         current_framebuffer.mCommandEncoder->setFragmentBytes(&mDrawUniforms, sizeof(DrawUniforms), 1);
     }
 
-    if (current_framebuffer.mLastShaderProgram != mShaderProgram) {
-        current_framebuffer.mLastShaderProgram = mShaderProgram;
-
+    const int8_t color_write = mCurrentColorWrite ? 1 : 0;
+    if (current_framebuffer.mLastShaderProgram != mShaderProgram ||
+        current_framebuffer.mLastColorWrite != color_write) {
         MTL::RenderPipelineState* pipeline_state =
-            mShaderProgram->pipeline_state_variants[current_framebuffer.mMsaaLevel];
+            color_write ? mShaderProgram->pipeline_state_variants[current_framebuffer.mMsaaLevel]
+                        : gfx_metal_no_color_pipeline(mDevice, mShaderProgram, current_framebuffer.mMsaaLevel);
+        if (pipeline_state == nullptr) {
+            // A depth-only draw we can't mask must not paint the color buffer.
+            autorelease_pool->release();
+            return;
+        }
+        current_framebuffer.mLastShaderProgram = mShaderProgram;
         current_framebuffer.mCommandEncoder->setRenderPipelineState(pipeline_state);
+
+        if (current_framebuffer.mLastColorWrite != color_write) {
+            current_framebuffer.mLastColorWrite = color_write;
+            // Like the OpenGL backend: ordinary draws use depth clamping
+            // (permissive N64-style near plane); depth-only redirect draws
+            // need real clipping so a mask mesh crossing the camera plane
+            // doesn't smear depth beyond its authored region.
+            current_framebuffer.mCommandEncoder->setDepthClipMode(color_write ? MTL::DepthClipModeClamp
+                                                                              : MTL::DepthClipModeClip);
+        }
     }
 
     current_framebuffer.mCommandEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, 0.f, buf_vbo_num_tris * 3);
@@ -693,6 +750,7 @@ void GfxRenderingAPIMetal::EndFrame() {
         fb.mLastDepthTest = -1;
         fb.mLastDepthMask = -1;
         fb.mLastZmodeDecal = -1;
+        fb.mLastColorWrite = -1;
     }
 
     mFrameAutoreleasePool->release();
@@ -1113,6 +1171,7 @@ void GfxRenderingAPIMetal::ClearFramebuffer(bool color, bool depth) {
     framebuffer.mLastDepthTest = -1;
     framebuffer.mLastDepthMask = -1;
     framebuffer.mLastZmodeDecal = -1;
+    framebuffer.mLastColorWrite = -1;
 }
 
 void GfxRenderingAPIMetal::ResolveMSAAColorBuffer(int fb_id_target, int fb_id_source) {
@@ -1360,6 +1419,7 @@ void GfxRenderingAPIMetal::CopyFramebuffer(int fb_dst_id, int fb_src_id, int src
     source_framebuffer.mLastDepthTest = -1;
     source_framebuffer.mLastDepthMask = -1;
     source_framebuffer.mLastZmodeDecal = -1;
+    source_framebuffer.mLastColorWrite = -1;
 }
 
 void GfxRenderingAPIMetal::GfxRenderingAPIMetal::ReadFramebufferToCPU(int fb_id, uint32_t width, uint32_t height,
