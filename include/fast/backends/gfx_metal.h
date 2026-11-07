@@ -29,6 +29,7 @@ class Device;
 class Function;
 class Buffer;
 class RenderPipelineState;
+class RenderPipelineDescriptor;
 class CommandQueue;
 class Viewport;
 class Library;
@@ -55,6 +56,11 @@ struct ShaderProgramMetal {
 
     // hashed by msaa_level
     MTL::RenderPipelineState* pipeline_state_variants[9];
+    // Same pipelines with color writes masked off, built on first use for
+    // draws into a color image redirected to the Z buffer (SetColorWriteMask).
+    MTL::RenderPipelineState* pipeline_state_variants_no_color[9];
+    // Retained so the no-color variants can be built lazily.
+    MTL::RenderPipelineDescriptor* pipeline_descriptor;
 };
 
 // Compiled post-process program. The pipeline state expects:
@@ -177,6 +183,7 @@ struct FramebufferMetal {
     int8_t mLastDepthTest = -1;
     int8_t mLastDepthMask = -1;
     int8_t mLastZmodeDecal = -1;
+    int8_t mLastColorWrite = -1;
 };
 
 struct FrameUniforms {
@@ -210,6 +217,7 @@ class GfxRenderingAPIMetal final : public GfxRenderingAPI {
     void SetSamplerParameters(int sampler, bool linear_filter, uint32_t cms, uint32_t cmt) override;
     void SetDepthTestAndMask(bool depth_test, bool z_upd) override;
     void SetZmodeDecal(bool decal) override;
+    void SetColorWriteMask(bool enable) override;
     void SetViewport(int x, int y, int width, int height) override;
     void SetScissor(int x, int y, int width, int height) override;
     void SetUseAlpha(bool useAlpha) override;
@@ -309,6 +317,7 @@ class GfxRenderingAPIMetal final : public GfxRenderingAPI {
 
     int32_t mRenderTargetHeight;
     int mCurrentFramebuffer;
+    bool mCurrentColorWrite = true;
     size_t mCurrentVertexBufferOffset;
     FilteringMode mCurrentFilterMode = FILTER_THREE_POINT;
 
