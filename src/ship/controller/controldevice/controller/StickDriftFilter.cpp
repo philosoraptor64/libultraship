@@ -1,4 +1,4 @@
-#include "StickDriftFilter.h"
+#include "ship/controller/controldevice/controller/StickDriftFilter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,11 +12,16 @@ namespace {
 // Below this a direction is centered: runtime state clears.
 constexpr float kClear = 4.0f;
 
-// Creep: kCreepTics consecutive moves smaller than kCreepStep, all the same
-// way. Measured ghosts (Xbox Wireless Controller, Bluetooth, iOS) move 0.04 to
-// 0.14 per tick; a deliberate slow steering ease is ~0.25 or more, and a
-// thumb is never this steady for half a second.
-constexpr float kCreepStep = 0.2f;
+// Creep: the value keeps changing the same way at a slow average rate. Many
+// devices report only on change, so it is judged per report, not per tick.
+// A ghost measured on an Xbox Wireless Controller (Bluetooth, iOS) stepped
+// 0.6 every ~25-30 ticks, or ~0.1 per tick right after a release; a
+// deliberate slow steering ease is ~0.25 per tick or more. A creep is at
+// least kCreepReports same-way reports, each under kCreepStep and slower than
+// kCreepRate, spanning kCreepTics or more.
+constexpr float kCreepStep = 1.0f;
+constexpr float kCreepRate = 0.2f;
+constexpr int16_t kCreepReports = 3;
 constexpr int16_t kCreepTics = 30;
 
 // Frozen: kStillTics consecutive moves smaller than kStill. A thumb holding
@@ -24,13 +29,16 @@ constexpr int16_t kCreepTics = 30;
 constexpr float kStill = 0.15f;
 constexpr int16_t kStillTics = 8;
 
-// Sticky release: a fall of at least kFastFall in one tick that then freezes
-// at kStickyMin or more. A healthy stick lands near center instead.
+// Sticky release: a fall of at least kFastFall in one tick, after which the
+// value is still at kStickyMin or more kStickyTics later without having risen
+// (a re-push). A healthy stick reaches center within a few ticks.
 constexpr float kFastFall = 3.0f;
 constexpr float kStickyMin = 10.0f;
+constexpr int16_t kStickyTics = 12;
 
 // Drifty-direction rules.
-constexpr int16_t kFallTics = 4;      // small falls in a row = ghost decay
+constexpr int16_t kSlideReports = 2;  // slow same-way reports toward center
+constexpr int16_t kSlideTics = 6;     // ...spanning this long = ghost decay
 constexpr float kFlickRise = 8.0f;    // a rise this fast is a fresh flick
 constexpr float kFullHold = 80.0f;    // frozen at/above this = a real full hold
 constexpr float kMinSpan = 3.0f;      // travel kept above a zero near full tilt
@@ -41,10 +49,8 @@ void StickDriftFilter::ClearRuntime(int index) {
     mHalves[index] = {};
 }
 
-void StickDriftFilter::AddEvidence(int index) {
-    if (mEvidence[index] < UINT8_MAX) {
-        mEvidence[index]++;
-    }
+void StickDriftFilter::AddEvidence(int index, uint8_t weight) {
+    mEvidence[index] = static_cast<uint8_t>(std::min<int>(mEvidence[index] + weight, UINT8_MAX));
 }
 
 bool StickDriftFilter::IsDrifty(Direction direction) const {
@@ -97,7 +103,7 @@ float StickDriftFilter::FilterHalf(int index, float value) {
             h.rest = h.last;
             h.flicking = true;
             h.released = false;
-            h.falls = h.rises = h.creeps = h.still = 0;
+            h.creeps = h.creepTics = h.still = 0;
             h.last = value;
             if (wasActive) {
                 // One neutral tick, so games that require leaving neutral
@@ -114,43 +120,57 @@ float StickDriftFilter::FilterHalf(int index, float value) {
 
     // Streaks. Unchanged ticks (no new report from the device) keep them.
     const float step = std::fabs(delta);
+    h.sinceReport++;
     if (delta != 0.0f) {
         const int8_t dir = (delta > 0.0f) ? 1 : -1;
-        if (step < kCreepStep) {
-            h.creeps = (dir == h.creepDir) ? h.creeps + 1 : 1;
-            h.creepDir = dir;
+        const bool slow = step < kCreepStep && step / h.sinceReport < kCreepRate;
+        if (slow && dir == h.creepDir) {
+            h.creeps++;
+            h.creepTics += h.sinceReport;
+        } else if (slow) {
+            h.creeps = 1;
+            h.creepTics = h.sinceReport;
         } else {
             h.creeps = 0;
+            h.creepTics = 0;
         }
-        h.falls = (delta < 0.0f && -delta < kFastFall) ? h.falls + 1 : 0;
+        h.creepDir = dir;
+        h.sinceReport = 0;
     }
     h.still = (step < kStill) ? h.still + 1 : 0;
 
     bool rezero = false;
 
-    // Creep is drift on any stick.
-    if (h.creeps == kCreepTics) {
-        AddEvidence(index);
+    // Creep is drift on any stick, and no thumb produces it: one creep marks
+    // the direction drifty at once.
+    const bool creeping = h.creeps >= kCreepReports && h.creepTics >= kCreepTics;
+    if (creeping && !h.creepCounted) {
+        AddEvidence(index, kDriftyEvidence);
+        h.creepCounted = true;
     }
-    if (h.creeps >= kCreepTics) {
+    if (creeping) {
         rezero = true;
     }
 
-    // Sticky-release evidence (any stick): a fast fall that freezes short of
+    // Sticky-release evidence (any stick): a fast fall that stays short of
     // center.
     if (-delta >= kFastFall) {
         h.released = true;
+        h.sinceRelease = 0;
+    } else if (h.released && delta > 0.0f) {
+        h.released = false; // pushed again: not a release
     }
-    if (h.released && h.still == kStillTics) {
-        if (value >= kStickyMin) {
-            AddEvidence(index);
+    if (h.released && ++h.sinceRelease == kStickyTics) {
+        if (value >= kStickyMin && value < kFullHold) {
+            AddEvidence(index, 1);
         }
         h.released = false;
     }
 
     if (drifty) {
         const bool frozen = h.still >= kStillTics && value < kFullHold;
-        if (-delta >= kFastFall || h.falls >= kFallTics || frozen) {
+        const bool sliding = h.creepDir < 0 && h.creeps >= kSlideReports && h.creepTics >= kSlideTics;
+        if (-delta >= kFastFall || sliding || frozen) {
             rezero = true;
         }
     }

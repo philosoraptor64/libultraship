@@ -5,6 +5,8 @@
 #include <memory>
 #include <unordered_map>
 #include "ship/controller/controldevice/controller/mapping/keyboard/KeyboardScancodes.h"
+#include "ship/controller/controldevice/controller/StickDriftFilter.h"
+#include <string>
 
 namespace Ship {
 
@@ -61,10 +63,22 @@ class ControllerStick {
     // (0.0..MAX_AXIS_RANGE). Lets consumers implement custom stick-shaping
     // (e.g. per-axis remaps that need to bypass the circular deadzone /
     // octagonal gate / notch snap baked into Process()).
+    // With drift correction on (the default), these are the drift-filtered
+    // values from the last UpdatePad().
     float GetAxisDirectionValue(Direction direction);
+
+    // Per-direction drift correction (see StickDriftFilter). The learned
+    // drifty directions are saved per physical controller.
+    void SetDriftCorrection(bool enabled);
+    bool GetDriftCorrection();
+    void ResetDriftProfile();
+    uint8_t GetDriftyDirectionMask();
 
   private:
     double GetClosestNotch(double angle, double approximationThreshold);
+    float GetRawAxisDirectionValue(Direction direction);
+    void UpdateDriftFilter();
+    std::string GetDriftProfileCVarName(const std::string& deviceKey);
     void LoadAxisDirectionMappingFromConfig(std::string id);
 
     uint8_t mPortIndex;
@@ -77,6 +91,12 @@ class ControllerStick {
     uint8_t mDeadzonePercentage;
     float mDeadzone;
     uint8_t mNotchSnapAngle;
+
+    bool mDriftCorrection;
+    StickDriftFilter mDriftFilter;
+    float mFilteredAxisDirectionValues[4];
+    std::string mDriftDeviceKey;
+    uint8_t mDriftyMask;
 
     std::unordered_map<Direction, std::unordered_map<std::string, std::shared_ptr<ControllerAxisDirectionMapping>>>
         mAxisDirectionMappings;

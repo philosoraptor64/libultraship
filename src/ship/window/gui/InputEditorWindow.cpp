@@ -754,6 +754,32 @@ void InputEditorWindow::DrawStickSection(uint8_t port, uint8_t stick, int32_t id
             }
         }
 
+        bool driftCorrection = controllerStick->GetDriftCorrection();
+        if (ImGui::Checkbox(StringHelper::Sprintf("Drift Correction##DriftCorrection%d", id).c_str(),
+                            &driftCorrection)) {
+            controllerStick->SetDriftCorrection(driftCorrection);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Detects stick drift per direction and corrects it. Learned directions are "
+                              "remembered for each controller.");
+        }
+        const uint8_t driftyMask = controllerStick->GetDriftyDirectionMask();
+        if (driftCorrection && driftyMask != 0) {
+            static const char* kDirectionNames[] = { "right", "left", "up", "down" };
+            std::string learned;
+            for (int i = 0; i < 4; i++) {
+                if (driftyMask & (1 << i)) {
+                    learned += learned.empty() ? kDirectionNames[i] : StringHelper::Sprintf(", %s", kDirectionNames[i]);
+                }
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(correcting %s)", learned.c_str());
+            ImGui::SameLine();
+            if (ImGui::Button(StringHelper::Sprintf("Forget###resetStickDrift%d", id).c_str())) {
+                controllerStick->ResetDriftProfile();
+            }
+        }
+
         ImGui::TreePop();
     }
 }

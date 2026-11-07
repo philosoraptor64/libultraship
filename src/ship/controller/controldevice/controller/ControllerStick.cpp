@@ -13,6 +13,9 @@
 #include <algorithm>
 
 #include "ship/Context.h"
+#include "ship/controller/controldeck/ControlDeck.h"
+#include <SDL2/SDL.h>
+#include <cctype>
 #include "ship/window/Window.h"
 
 // for some reason windows isn't seeing M_PI
@@ -33,6 +36,9 @@ ControllerStick::ControllerStick(uint8_t portIndex, StickIndex stickIndex)
     mDeadzonePercentage = DEFAULT_STICK_DEADZONE_PERCENTAGE;
     mDeadzone = 17.0f;
     mNotchSnapAngle = 0;
+    mDriftCorrection = true;
+    mDriftyMask = 0;
+    std::fill(std::begin(mFilteredAxisDirectionValues), std::end(mFilteredAxisDirectionValues), 0.0f);
 }
 
 ControllerStick::~ControllerStick() {
@@ -204,6 +210,12 @@ void ControllerStick::ReloadAllMappingsFromConfig() {
                               stickIndexToConfigStickIndexName[mStickIndex].c_str())
             .c_str(),
         0));
+
+    mDriftCorrection = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+                           StringHelper::Sprintf(CVAR_PREFIX_CONTROLLERS ".Port%d.%s.DriftCorrection", mPortIndex + 1,
+                                                 stickIndexToConfigStickIndexName[mStickIndex].c_str())
+                               .c_str(),
+                           1) != 0;
 }
 
 double ControllerStick::GetClosestNotch(double angle, double approximationThreshold) {
@@ -214,6 +226,10 @@ double ControllerStick::GetClosestNotch(double angle, double approximationThresh
 }
 
 float ControllerStick::GetAxisDirectionValue(Direction direction) {
+    return mDriftCorrection ? mFilteredAxisDirectionValues[direction] : GetRawAxisDirectionValue(direction);
+}
+
+float ControllerStick::GetRawAxisDirectionValue(Direction direction) {
     if (mAxisDirectionMappings[direction].size() == 0) {
         return 0;
     }
@@ -343,7 +359,98 @@ ControllerStick::GetAllAxisDirectionMappingByDirection(Direction direction) {
 }
 
 void ControllerStick::UpdatePad(int8_t& x, int8_t& y) {
+    if (mDriftCorrection) {
+        UpdateDriftFilter();
+    }
     Process(x, y);
+}
+
+// Identifies the physical controller driving this port, so its learned drift
+// profile follows it: SDL GUID (model) plus serial when the device reports one.
+static std::string DriftDeviceKeyForPort(uint8_t portIndex) {
+    for (const auto& [instanceId, gamepad] :
+         Context::GetInstance()->GetControlDeck()->GetConnectedPhysicalDeviceManager()->GetConnectedSDLGamepadsForPort(
+             portIndex)) {
+        char guid[33];
+        SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(gamepad)), guid, sizeof(guid));
+        std::string key = guid;
+        const char* serial = SDL_GameControllerGetSerial(gamepad);
+        if (serial != nullptr) {
+            key += "_";
+            for (const char* c = serial; *c != '\0'; c++) {
+                if (isalnum(static_cast<unsigned char>(*c))) {
+                    key += *c;
+                }
+            }
+        }
+        return key;
+    }
+    return "";
+}
+
+std::string ControllerStick::GetDriftProfileCVarName(const std::string& deviceKey) {
+    return StringHelper::Sprintf(CVAR_PREFIX_CONTROLLERS ".DriftProfiles.%s.%s", deviceKey.c_str(),
+                                 stickIndexToConfigStickIndexName[mStickIndex].c_str());
+}
+
+void ControllerStick::UpdateDriftFilter() {
+    auto cvars = Context::GetInstance()->GetConsoleVariables();
+
+    const std::string key = DriftDeviceKeyForPort(mPortIndex);
+    if (key != mDriftDeviceKey) {
+        mDriftFilter.Reset();
+        mDriftDeviceKey = key;
+        mDriftyMask = key.empty() ? 0 : cvars->GetInteger(GetDriftProfileCVarName(key).c_str(), 0);
+        mDriftFilter.SetDriftyMask(mDriftyMask);
+    }
+
+    float values[StickDriftFilter::DirectionCount];
+    values[StickDriftFilter::Right] = GetRawAxisDirectionValue(RIGHT);
+    values[StickDriftFilter::Left] = GetRawAxisDirectionValue(LEFT);
+    values[StickDriftFilter::Up] = GetRawAxisDirectionValue(UP);
+    values[StickDriftFilter::Down] = GetRawAxisDirectionValue(DOWN);
+    mDriftFilter.Update(values);
+    mFilteredAxisDirectionValues[RIGHT] = values[StickDriftFilter::Right];
+    mFilteredAxisDirectionValues[LEFT] = values[StickDriftFilter::Left];
+    mFilteredAxisDirectionValues[UP] = values[StickDriftFilter::Up];
+    mFilteredAxisDirectionValues[DOWN] = values[StickDriftFilter::Down];
+
+    const uint8_t mask = mDriftFilter.GetDriftyMask();
+    if (mask != mDriftyMask && !mDriftDeviceKey.empty()) {
+        mDriftyMask = mask;
+        SPDLOG_INFO("Port {} {}: drift-corrected directions now 0x{:x} (R/L/U/D bits)", mPortIndex + 1,
+                    stickIndexToConfigStickIndexName[mStickIndex], mask);
+        cvars->SetInteger(GetDriftProfileCVarName(mDriftDeviceKey).c_str(), mask);
+        cvars->Save();
+    }
+}
+
+void ControllerStick::SetDriftCorrection(bool enabled) {
+    mDriftCorrection = enabled;
+    auto cvars = Context::GetInstance()->GetConsoleVariables();
+    cvars->SetInteger(StringHelper::Sprintf(CVAR_PREFIX_CONTROLLERS ".Port%d.%s.DriftCorrection", mPortIndex + 1,
+                                            stickIndexToConfigStickIndexName[mStickIndex].c_str())
+                          .c_str(),
+                      enabled ? 1 : 0);
+    cvars->Save();
+}
+
+bool ControllerStick::GetDriftCorrection() {
+    return mDriftCorrection;
+}
+
+uint8_t ControllerStick::GetDriftyDirectionMask() {
+    return mDriftyMask;
+}
+
+void ControllerStick::ResetDriftProfile() {
+    mDriftFilter.Reset();
+    mDriftyMask = 0;
+    if (!mDriftDeviceKey.empty()) {
+        auto cvars = Context::GetInstance()->GetConsoleVariables();
+        cvars->ClearVariable(GetDriftProfileCVarName(mDriftDeviceKey).c_str());
+        cvars->Save();
+    }
 }
 
 bool ControllerStick::ProcessKeyboardEvent(KbEventType eventType, KbScancode scancode) {

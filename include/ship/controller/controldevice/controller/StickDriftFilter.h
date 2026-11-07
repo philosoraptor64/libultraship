@@ -10,11 +10,11 @@ namespace Ship {
 // Worn or misreporting sticks show two signatures a thumb never produces:
 //  - creep: the value slides slowly and steadily for many ticks, either back
 //    toward center after a release or away from it while untouched;
-//  - sticky release: the value falls fast (the stick was let go) and then
-//    freezes short of center.
-// Creep is unambiguous, so it is corrected on any stick. Each sticky release
-// or creep adds evidence for that direction; a clean release (fast fall to
-// center) removes some. A direction with enough evidence is drifty, and only
+//  - sticky release: the value falls fast (the stick was let go) but is still
+//    well short of center a moment later.
+// Creep is unambiguous: it is corrected on any stick and marks the direction
+// drifty at once. Each sticky release adds evidence; a clean release (fast
+// fall to center) removes some. A direction with enough evidence is drifty, and only
 // then do the more aggressive rules apply to it: a fast fall is assumed to
 // reach neutral, a frozen part-way value becomes the zero, and a fast rise
 // counts as a fresh flick measured from where it started. Healthy directions
@@ -32,8 +32,8 @@ class StickDriftFilter {
     enum Direction : uint8_t { Right = 0, Left = 1, Up = 2, Down = 3, DirectionCount = 4 };
 
     static constexpr float kMaxValue = 85.0f;
-    // Sticky-release or creep events before a direction counts as drifty.
-    static constexpr uint8_t kDriftyEvidence = 3;
+    // Sticky releases before a direction counts as drifty (one creep is enough).
+    static constexpr uint8_t kDriftyEvidence = 2;
 
     // values: raw per-direction magnitudes, indexed by Direction. Overwritten
     // with the filtered values.
@@ -51,18 +51,20 @@ class StickDriftFilter {
         float rest;
         float last;
         float out;
-        int16_t falls;   // consecutive small falls
-        int16_t rises;   // consecutive tiny rises
-        int16_t creeps;  // consecutive creep-sized moves in one direction
-        int8_t creepDir; // sign of the current creep streak
+        int16_t creeps;      // consecutive slow same-way reports
+        int16_t creepTics;   // ticks those reports span
+        int16_t sinceReport; // ticks since the value last changed
+        int8_t creepDir;     // sign of the current creep streak
+        bool creepCounted;   // this creep already added its evidence
         int16_t still;   // consecutive frozen ticks
         bool flicking;
-        bool released;   // saw a fast fall; waiting to see where it settles
+        bool released;        // saw a fast fall; waiting to see where it settles
+        int16_t sinceRelease; // ticks since that fall
     };
 
     float FilterHalf(int index, float value);
     void ClearRuntime(int index);
-    void AddEvidence(int index);
+    void AddEvidence(int index, uint8_t weight);
 
     Half mHalves[DirectionCount] = {};
     uint8_t mEvidence[DirectionCount] = {};

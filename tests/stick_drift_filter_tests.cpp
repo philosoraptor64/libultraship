@@ -157,6 +157,36 @@ TEST(StickDriftFilter, CancelsCreepAwayFromCenter) {
     }
 }
 
+TEST(StickDriftFilter, CancelsStaircaseCreepAndLearnsFromIt) {
+    // Measured shape: reports only on change, +0.6 every ~28 ticks.
+    StickDriftFilter filter;
+    std::vector<float> raw;
+    float value = 24.0f;
+    for (int step = 0; step < 12; step++) {
+        Hold(raw, value, 28);
+        value += 0.6f;
+    }
+    const auto out = Feed(filter, Dir::Up, raw);
+    EXPECT_TRUE(filter.IsDrifty(Dir::Up));
+    for (size_t i = 28 * 4; i < out.size(); i++) {
+        EXPECT_LT(out[i], kNeutral) << "tick " << i;
+    }
+}
+
+TEST(StickDriftFilter, DipAndRepushToFullIsNotSticky) {
+    StickDriftFilter filter;
+    std::vector<float> raw;
+    for (int r = 0; r < 10; r++) {
+        Hold(raw, 85, 10);
+        Append(raw, { 74, 85 });
+        Hold(raw, 85, 20);
+        Append(raw, { 0 });
+        Hold(raw, 0, 10);
+    }
+    Feed(filter, Dir::Up, raw);
+    EXPECT_FALSE(filter.IsDrifty(Dir::Up));
+}
+
 TEST(StickDriftFilter, CancelsFastGhostDecayBeforeLearning) {
     StickDriftFilter filter;
     std::vector<float> raw;
