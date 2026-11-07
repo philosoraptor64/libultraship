@@ -218,6 +218,17 @@ void GfxWindowBackendSDL2::SetFullscreenImpl(bool on, bool call_callback) {
         return;
     }
 
+#ifdef __IOS__
+    // UIKit already sizes this borderless window to its scene. SDL2's
+    // desktop fullscreen path overwrites that landscape size with the
+    // screen's portrait display mode, leaving ImGui and Metal out of sync.
+    mFullScreen = on;
+    if (mOnFullscreenChanged != nullptr && call_callback) {
+        mOnFullscreenChanged(on);
+    }
+    return;
+#endif
+
     int display_in_use = SDL_GetWindowDisplayIndex(mWnd);
     if (display_in_use < 0) {
         SPDLOG_WARN("Can't detect on which monitor we are. Probably out of display area?");

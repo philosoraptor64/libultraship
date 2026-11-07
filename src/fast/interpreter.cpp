@@ -154,6 +154,18 @@ bool portFindNormalizedDisplayListCommand(const Fast::F3DGfx* cmd, const PortPac
     return false;
 }
 
+int portCheckDisplayListBounds(const Fast::F3DGfx* cmd) {
+    const int result = sDLBoundsCheck ? sDLBoundsCheck(reinterpret_cast<uintptr_t>(cmd)) : kDLBoundsUnknown;
+    // The game registry tracks source buffers. A live widened copy can be
+    // allocated just beyond one of those buffers (observed on iOS), where
+    // the registry's walk-past window would reject it. Only override that
+    // rejection for commands actually inside a live cache allocation.
+    if (result == kDLBoundsWalkedPast && portFindNormalizedDisplayListCommand(cmd, nullptr, nullptr)) {
+        return kDLBoundsInRange;
+    }
+    return result;
+}
+
 Fast::F3DGfx* portNormalizeDisplayListPointer(Fast::F3DGfx* dlist) {
     uintptr_t fileBase = 0;
     size_t fileSize = 0;
@@ -5703,7 +5715,7 @@ bool gfx_dl_handler_common(F3DGfx** cmd0) {
          * gcDrawMObjForDObj G_ENDDL terminator (decomp side) avoid in
          * the cases we've measured. */
         uintptr_t subAddr = (uintptr_t)subGFX;
-        if (sDLBoundsCheck && sDLBoundsCheck(subAddr) == kDLBoundsWalkedPast) {
+        if (portCheckDisplayListBounds(subGFX) == kDLBoundsWalkedPast) {
             static int sRejectCount = 0;
             if (sRejectCount < 10) {
                 sRejectCount++;
@@ -6811,7 +6823,7 @@ static void gfx_step() {
      * Run's outer loop will pick up the parent frame (or exit if stack is
      * empty). */
     {
-        if (sDLBoundsCheck && sDLBoundsCheck((uintptr_t)cmd) == kDLBoundsWalkedPast) {
+        if (portCheckDisplayListBounds(cmd) == kDLBoundsWalkedPast) {
             static int sCount = 0;
             if (sCount < 10) {
                 sCount++;
