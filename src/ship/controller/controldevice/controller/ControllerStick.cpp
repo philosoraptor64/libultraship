@@ -418,7 +418,8 @@ void ControllerStick::UpdateDriftFilter() {
     const uint8_t mask = mDriftFilter.GetDriftyMask();
     if (mask != mDriftyMask && !mDriftDeviceKey.empty()) {
         mDriftyMask = mask;
-        SPDLOG_INFO("Port {} {}: drift-corrected directions now 0x{:x} (R/L/U/D bits)", mPortIndex + 1,
+        // A warning so release builds (which log warnings and up) record it.
+        SPDLOG_WARN("Port {} {}: stick drift detected, correcting directions 0x{:x} (R/L/U/D bits)", mPortIndex + 1,
                     stickIndexToConfigStickIndexName[mStickIndex], mask);
         cvars->SetInteger(GetDriftProfileCVarName(mDriftDeviceKey).c_str(), mask);
         cvars->Save();
