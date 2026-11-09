@@ -489,7 +489,15 @@ void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bo
         if (mVsyncEnabled) {
             flags |= SDL_RENDERER_PRESENTVSYNC;
         }
-        if (mExternalWindow && sExternalRenderer != nullptr && *sExternalRenderer != nullptr) {
+        // A window has at most one SDL renderer: another game module that ran
+        // on the host's window before this one keeps its renderer there, so
+        // take that one (any module's cache then points at it).
+        if (mExternalWindow && SDL_GetRenderer(mWnd) != nullptr) {
+            mRenderer = SDL_GetRenderer(mWnd);
+            if (sExternalRenderer != nullptr) {
+                *sExternalRenderer = mRenderer;
+            }
+        } else if (mExternalWindow && sExternalRenderer != nullptr && *sExternalRenderer != nullptr) {
             mRenderer = static_cast<SDL_Renderer*>(*sExternalRenderer);  // reused from the last run
         } else {
             mRenderer = SDL_CreateRenderer(mWnd, -1, flags);

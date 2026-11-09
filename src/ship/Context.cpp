@@ -59,6 +59,11 @@ Context::~Context() {
     GetConfig()->Save();
     mConfig = nullptr;
     spdlog::shutdown();
+    // spdlog may be a shared library that outlives this context (a game
+    // module inside a host app, next to other games using the same spdlog):
+    // leave a plain default logger, as a fresh process has, or the next
+    // SPDLOG_* call anywhere dereferences a null default logger.
+    spdlog::set_default_logger(spdlog::stderr_color_mt("lus"));
 }
 
 std::shared_ptr<Context>
