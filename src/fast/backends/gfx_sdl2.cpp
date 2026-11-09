@@ -365,6 +365,19 @@ static LRESULT CALLBACK gfx_sdl_wnd_proc(HWND h_wnd, UINT message, WPARAM w_para
 };
 #endif
 
+// A host app (e.g. the i64 launcher running this game as a module) can hand
+// in the SDL window to draw into: the backend then neither creates nor
+// destroys it, and never calls SDL_Quit (the host owns SDL).
+static SDL_Window* sExternalWindow = nullptr;
+// The host keeps the renderer across runs in *sExternalRenderer (memory that
+// survives the module's resets): creating a new SDL renderer on the same
+// window every run leaves SDL's previous Metal view and its surfaces behind.
+static void** sExternalRenderer = nullptr;
+extern "C" void LUS_SetExternalWindow(void* sdlWindow, void** rendererCache) {
+    sExternalWindow = static_cast<SDL_Window*>(sdlWindow);
+    sExternalRenderer = rendererCache;
+}
+
 void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bool startFullScreen, uint32_t width,
                                 uint32_t height, int32_t posX, int32_t posY) {
     mWindowWidth = width;
@@ -433,7 +446,13 @@ void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bo
         flags = flags | SDL_WINDOW_METAL;
     }
 
-    mWnd = SDL_CreateWindow(title, posX, posY, mWindowWidth, mWindowHeight, flags);
+    if (sExternalWindow != nullptr) {
+        mWnd = sExternalWindow;
+        mExternalWindow = true;
+        SDL_GetWindowSize(mWnd, &mWindowWidth, &mWindowHeight);
+    } else {
+        mWnd = SDL_CreateWindow(title, posX, posY, mWindowWidth, mWindowHeight, flags);
+    }
 #ifdef _WIN32
     // Get Windows window handle and use it to subclass the window procedure.
     // Needed to circumvent SDLs DPI scaling problems under windows (original does only scale *sometimes*).
@@ -470,7 +489,14 @@ void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bo
         if (mVsyncEnabled) {
             flags |= SDL_RENDERER_PRESENTVSYNC;
         }
-        mRenderer = SDL_CreateRenderer(mWnd, -1, flags);
+        if (mExternalWindow && sExternalRenderer != nullptr && *sExternalRenderer != nullptr) {
+            mRenderer = static_cast<SDL_Renderer*>(*sExternalRenderer);  // reused from the last run
+        } else {
+            mRenderer = SDL_CreateRenderer(mWnd, -1, flags);
+            if (mExternalWindow && sExternalRenderer != nullptr) {
+                *sExternalRenderer = mRenderer;
+            }
+        }
         if (mRenderer == nullptr) {
             SPDLOG_ERROR("Error creating renderer: {}", SDL_GetError());
             return;
@@ -822,13 +848,18 @@ void GfxWindowBackendSDL2::Destroy() {
     // pointer is also guarded because Init() takes one of two mutually
     // exclusive paths — OpenGL leaves mRenderer null, Metal leaves mCtx null
     // — and SDL_GL_DeleteContext is not documented to accept null.
-    if (mRenderer) {
-        SDL_DestroyRenderer(mRenderer);
-        mRenderer = nullptr;
+    if (mRenderer && !(mExternalWindow && sExternalRenderer != nullptr)) {
+        SDL_DestroyRenderer(mRenderer);  // a host-kept renderer stays for the next run
     }
+    mRenderer = nullptr;
     if (mCtx) {
         SDL_GL_DeleteContext(mCtx);
         mCtx = nullptr;
+    }
+    if (mExternalWindow) {
+        mWnd = nullptr;  // the host's window and SDL stay
+        mExternalWindow = false;
+        return;
     }
     if (mWnd) {
         SDL_DestroyWindow(mWnd);

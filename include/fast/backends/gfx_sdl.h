@@ -51,6 +51,7 @@ class GfxWindowBackendSDL2 final : public GfxWindowBackend {
     void SyncFramerateWithTime() const;
 
     SDL_Window* mWnd = nullptr;
+    bool mExternalWindow = false;  // handed in by a host app (LUS_SetExternalWindow)
     SDL_Rect mCursorClip;
     SDL_GLContext mCtx = nullptr;
     SDL_Renderer* mRenderer = nullptr;

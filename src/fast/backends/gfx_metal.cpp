@@ -1649,6 +1649,10 @@ GfxRenderingAPIMetal::~GfxRenderingAPIMetal() {
         mTextures.clear();
         for (auto& fb : mFramebuffers) {
             fb.mLastShaderProgram = nullptr;
+            // Retained in SetupScreenFramebuffer / CreateFramebuffer; fb 0's
+            // holds the last drawable's texture, which keeps the drawable,
+            // the layer and SDL's Metal view (with its IOSurfaces) alive.
+            drop(fb.mRenderPassDescriptor);
             drop(fb.mDepthTexture);
             drop(fb.mMsaaDepthTexture);
             delete fb.mScissorRect;
