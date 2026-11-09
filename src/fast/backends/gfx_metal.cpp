@@ -97,10 +97,16 @@ static void SetupScreenFramebuffer(uint32_t width, uint32_t height);
 void GfxRenderingAPIMetal::NewFrame() {
     int width, height;
     SDL_GetRendererOutputSize(mRenderer, &width, &height);
+    // NewFrame runs before StartFrame's per-frame pool exists: drain what
+    // it autoreleases here, or (without an app run loop draining an outer
+    // pool) every frame's drawable stays alive, and with it the layer, the
+    // SDL Metal view and their IOSurfaces after the window is gone.
+    NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
     SetupScreenFramebuffer(width, height);
 
     MTL::RenderPassDescriptor* current_render_pass = mFramebuffers[0].mRenderPassDescriptor;
     ImGui_ImplMetal_NewFrame(current_render_pass);
+    pool->release();
 }
 
 void GfxRenderingAPIMetal::SetupFloatingFrame() {
@@ -832,8 +838,15 @@ int GfxRenderingAPIMetal::CreateFramebuffer() {
 }
 
 void GfxRenderingAPIMetal::SetupScreenFramebuffer(uint32_t width, uint32_t height) {
-    mCurrentDrawable = nullptr;
+    // Own the drawable (and its texture, below) explicitly instead of relying
+    // on an autorelease pool that may not exist yet at this point of a frame.
+    if (mCurrentDrawable != nullptr) {
+        mCurrentDrawable->release();
+    }
     mCurrentDrawable = mLayer->nextDrawable();
+    if (mCurrentDrawable != nullptr) {
+        mCurrentDrawable->retain();
+    }
 
     bool msaa_enabled = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gMSAAValue", 1) > 1;
 
@@ -846,6 +859,7 @@ void GfxRenderingAPIMetal::SetupScreenFramebuffer(uint32_t width, uint32_t heigh
         tex.texture->release();
 
     tex.texture = mCurrentDrawable->texture();
+    tex.texture->retain();  // balanced by the release above on the next frame
 
     MTL::RenderPassDescriptor* render_pass_descriptor = MTL::RenderPassDescriptor::renderPassDescriptor();
     render_pass_descriptor->colorAttachments()->object(0)->setTexture(tex.texture);
@@ -1657,6 +1671,10 @@ GfxRenderingAPIMetal::~GfxRenderingAPIMetal() {
         }
         mPostProcessPrograms.clear();
         drop(mCommandQueue);
+        if (mCurrentDrawable != nullptr) {
+            mCurrentDrawable->release();
+            mCurrentDrawable = nullptr;
+        }
     }
     // The post-process sampler cache is keyed on (filter, wrap) — bounded
     // to 8 entries by design — but `newSamplerState` returns a retained
