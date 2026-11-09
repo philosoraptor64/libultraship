@@ -533,6 +533,16 @@ extern "C" void portResetPackedDisplayListCache(void) {
     sPortPackedDisplayListCache.clear();
 }
 
+// Re-entry (the game stopped inside a launcher, to be started again later):
+// free the renderer-side caches outright, not just empty them.
+extern "C" void portGfxReleaseForReentry(void) {
+    std::unordered_map<const void*, PortPackedDisplayListInfo>().swap(sPortPackedDisplayListCache);
+    {
+        std::lock_guard<std::mutex> lock(sTrustedLowVARangesMutex);
+        std::vector<TrustedLowVARange>().swap(sTrustedLowVARanges);
+    }
+}
+
 // Evict cached widened display lists whose source heap address falls in a
 // range that's about to be overwritten by a fresh reloc-file load.  Same
 // pattern as Interpreter::TextureCacheDeleteRange / portTextureCacheDeleteRange,
@@ -638,6 +648,12 @@ static std::weak_ptr<Interpreter> mInstance;
 // Set a cached pointer to the instance so we don't need to go through the window every time
 void GfxSetInstance(std::shared_ptr<Interpreter> gfx) {
     mInstance = gfx;
+}
+
+// Diagnostics for re-entry (BattleShip port/reentry.cpp): strong references
+// to the renderer still alive (0 after a clean shutdown).
+extern "C" long port_gfx_instance_refs(void) {
+    return mInstance.use_count();
 }
 
 /* ─── DIAG: stale-DL-pointer tracing (PR #133 lead-gap + variant 5) ──────
