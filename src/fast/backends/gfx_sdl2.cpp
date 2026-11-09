@@ -758,10 +758,14 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
         t = qpc_to_100ns(SDL_GetPerformanceCounter());
     }
 #endif
-    if (left > 0 && t - next < 10000) {
-        // In case it takes some time for the application to wake up after sleep,
-        // or inaccurate mTimer,
-        // don't let that slow down the framerate.
+    // Keep a fixed schedule: when this frame is late by less than a whole
+    // frame (a slow wake-up from sleep, or a frame that took a bit longer),
+    // the next deadline stays on the grid, so the following frame catches up.
+    // Re-basing on the late time instead (as before, for lateness > 1 ms)
+    // lost that time for good: the Mac ran at ~55-59 fps instead of 60, which
+    // online play then had to correct by making the faster peer skip steps.
+    const int64_t interval = 10 * FRAME_INTERVAL_US_NUMERATOR / FRAME_INTERVAL_US_DENOMINATOR;
+    if (static_cast<int64_t>(t) - next < interval) {
         t = next;
     }
     previous_time = t;
