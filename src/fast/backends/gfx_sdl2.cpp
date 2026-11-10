@@ -497,9 +497,9 @@ void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bo
             if (sExternalRenderer != nullptr) {
                 *sExternalRenderer = mRenderer;
             }
-        } else if (mExternalWindow && sExternalRenderer != nullptr && *sExternalRenderer != nullptr) {
-            mRenderer = static_cast<SDL_Renderer*>(*sExternalRenderer);  // reused from the last run
         } else {
+            // (no renderer on the window: a cached one is stale, e.g. the host replaced
+            // it when another game ran; make this game's own)
             mRenderer = SDL_CreateRenderer(mWnd, -1, flags);
             if (mExternalWindow && sExternalRenderer != nullptr) {
                 *sExternalRenderer = mRenderer;
