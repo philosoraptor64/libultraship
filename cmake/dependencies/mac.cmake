@@ -40,3 +40,14 @@ target_link_libraries(ImGui PUBLIC ${OPENGL_opengl_LIBRARY} GLEW::GLEW)
 set_target_properties(ImGui PROPERTIES
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
 )
+
+# LUS_OBJC_PREFIX=<game>: Objective-C class names are process wide, so two
+# games inside one host app (i64) would both define ImGui's Metal backend
+# classes ("Class X is implemented in both"): give this game's copies its own
+# names.
+if (LUS_OBJC_PREFIX)
+    target_compile_definitions(ImGui PRIVATE
+        MetalContext=${LUS_OBJC_PREFIX}MetalContext
+        MetalBuffer=${LUS_OBJC_PREFIX}MetalBuffer
+        FramebufferDescriptor=${LUS_OBJC_PREFIX}FramebufferDescriptor)
+endif()

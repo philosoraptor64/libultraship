@@ -119,3 +119,14 @@ if (LUS_SHARED_SDL)
 else()
     target_link_libraries(ImGui PUBLIC SDL2::SDL2-static SDL2::SDL2main)
 endif()
+
+# LUS_OBJC_PREFIX=<game>: Objective-C class names are process wide, so two
+# games inside one host app (i64) would both define ImGui's Metal backend
+# classes ("Class X is implemented in both"): give this game's copies its own
+# names.
+if (LUS_OBJC_PREFIX)
+    target_compile_definitions(ImGui PRIVATE
+        MetalContext=${LUS_OBJC_PREFIX}MetalContext
+        MetalBuffer=${LUS_OBJC_PREFIX}MetalBuffer
+        FramebufferDescriptor=${LUS_OBJC_PREFIX}FramebufferDescriptor)
+endif()
