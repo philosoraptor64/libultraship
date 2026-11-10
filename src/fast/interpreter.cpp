@@ -637,13 +637,23 @@ Interpreter::Interpreter() {
     mBufVbo = new float[MAX_TRI_BUFFER * (32 * 3)];
 }
 
+static void GfxForgetExpiredInstance();
+
 Interpreter::~Interpreter() {
     delete mRsp;
     delete mRdp;
     delete[] mBufVbo;
+    // the cached weak pointer would keep this object's control block alive
+    // (a leak per run when a host app starts the game again)
+    GfxForgetExpiredInstance();
 }
 
 static std::weak_ptr<Interpreter> mInstance;
+static void GfxForgetExpiredInstance() {
+    if (mInstance.expired()) {
+        mInstance.reset();
+    }
+}
 
 // Set a cached pointer to the instance so we don't need to go through the window every time
 void GfxSetInstance(std::shared_ptr<Interpreter> gfx) {
