@@ -1,3 +1,6 @@
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include <stdio.h>
 
 #if defined(ENABLE_OPENGL) || defined(__APPLE__)
@@ -228,7 +231,10 @@ void GfxWindowBackendSDL2::SetFullscreenImpl(bool on, bool call_callback) {
         }
     }
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && TARGET_OS_IOS
+    // iOS: the window always fills the scene (SDL's fullscreen path resized it to the portrait display mode)
+    mFullScreen = on;
+#elif defined(__APPLE__)
     // Implement fullscreening with native macOS APIs
     if (on != isNativeMacOSFullscreenActive(mWnd)) {
         toggleNativeMacOSFullscreen(mWnd);
@@ -611,7 +617,7 @@ void GfxWindowBackendSDL2::HandleEvents() {
     }
 
     // resync fullscreen state
-#ifdef __APPLE__
+#if defined(__APPLE__) && !TARGET_OS_IOS
     auto nextFullscreenState = isNativeMacOSFullscreenActive(mWnd);
     if (mFullScreen != nextFullscreenState) {
         mFullScreen = nextFullscreenState;

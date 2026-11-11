@@ -1,4 +1,6 @@
-set(PLATFORM "OS64COMBINED")
+if(NOT PLATFORM)
+    set(PLATFORM "OS64COMBINED") # @port: -DPLATFORM=SIMULATORARM64 for the iOS Simulator
+endif()
 include(FetchContent)
 FetchContent_Declare(iostoolchain
     GIT_REPOSITORY https://github.com/leetal/ios-cmake
