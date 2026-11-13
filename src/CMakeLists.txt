@@ -198,6 +198,20 @@ find_package(tinyxml2 REQUIRED)
 target_link_libraries(libultraship PUBLIC tinyxml2::tinyxml2)
 
 find_package(spdlog REQUIRED)
+# a game module inside a host app (LUS_OBJC_PREFIX): spdlog's static archive (cmake/dependencies/mac.cmake)
+if (APPLE AND LUS_OBJC_PREFIX AND TARGET spdlog::spdlog)
+    get_target_property(_spdlog_dylib spdlog::spdlog IMPORTED_LOCATION_RELEASE)
+    if (NOT _spdlog_dylib)
+        get_target_property(_spdlog_dylib spdlog::spdlog IMPORTED_LOCATION_NOCONFIG)
+    endif()
+    get_filename_component(_spdlog_dir "${_spdlog_dylib}" DIRECTORY)
+    if (EXISTS "${_spdlog_dir}/libspdlog.a")
+        set_target_properties(spdlog::spdlog PROPERTIES
+            IMPORTED_LOCATION_RELEASE "${_spdlog_dir}/libspdlog.a"
+            IMPORTED_LOCATION_NOCONFIG "${_spdlog_dir}/libspdlog.a"
+            IMPORTED_LOCATION "${_spdlog_dir}/libspdlog.a")
+    endif()
+endif()
 target_link_libraries(libultraship PUBLIC spdlog::spdlog)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")

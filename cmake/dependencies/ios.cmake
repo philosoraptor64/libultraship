@@ -88,3 +88,14 @@ target_include_directories(ImGui PRIVATE ${metalcpp_SOURCE_DIR})
 target_compile_definitions(ImGui PUBLIC IMGUI_IMPL_METAL_CPP)
 
 target_link_libraries(ImGui PUBLIC SDL2::SDL2-static SDL2::SDL2main)
+
+# LUS_OBJC_PREFIX=<game>: Objective-C class names are process wide, so two
+# games inside one host app (i64) would both define ImGui's Metal backend
+# classes ("Class X is implemented in both"): give this game's copies its own
+# names.
+if (LUS_OBJC_PREFIX)
+    target_compile_definitions(ImGui PRIVATE
+        MetalContext=${LUS_OBJC_PREFIX}MetalContext
+        MetalBuffer=${LUS_OBJC_PREFIX}MetalBuffer
+        FramebufferDescriptor=${LUS_OBJC_PREFIX}FramebufferDescriptor)
+endif()

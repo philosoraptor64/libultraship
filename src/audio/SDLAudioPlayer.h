@@ -16,7 +16,8 @@ class SDLAudioPlayer final : public AudioPlayer {
     bool DoInit();
 
   private:
-    SDL_AudioDeviceID mDevice;
+    SDL_AudioDeviceID mDevice = 0;
+    bool mExternal = false; // LUS_SetExternalAudio: the host plays the audio
     int32_t mNumChannels = 2;
 };
 } // namespace Ship

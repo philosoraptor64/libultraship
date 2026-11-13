@@ -7,6 +7,8 @@
 
 #ifdef __APPLE__
 
+#include <unordered_set>
+
 #include "gfx_metal.h"
 
 #include <vector>
@@ -95,10 +97,16 @@ static void SetupScreenFramebuffer(uint32_t width, uint32_t height);
 void GfxRenderingAPIMetal::NewFrame() {
     int width, height;
     SDL_GetRendererOutputSize(mRenderer, &width, &height);
+    // NewFrame runs before StartFrame's per-frame pool exists: drain what it
+    // autoreleases here, or (without an app run loop draining an outer pool)
+    // every frame's drawable stays alive, and with it the layer, the SDL
+    // Metal view and their IOSurfaces after the window is gone.
+    NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
     SetupScreenFramebuffer(width, height);
 
     MTL::RenderPassDescriptor* current_render_pass = mFramebuffers[0].mRenderPassDescriptor;
     ImGui_ImplMetal_NewFrame(current_render_pass);
+    pool->release();
 }
 
 void GfxRenderingAPIMetal::SetupFloatingFrame() {
@@ -595,8 +603,15 @@ int GfxRenderingAPIMetal::CreateFramebuffer() {
 }
 
 void GfxRenderingAPIMetal::SetupScreenFramebuffer(uint32_t width, uint32_t height) {
-    mCurrentDrawable = nullptr;
+    // Own the drawable and its texture explicitly instead of relying on an
+    // autorelease pool that may not exist yet at this point of a frame.
+    if (mCurrentDrawable != nullptr) {
+        mCurrentDrawable->release();
+    }
     mCurrentDrawable = mLayer->nextDrawable();
+    if (mCurrentDrawable != nullptr) {
+        mCurrentDrawable->retain();
+    }
 
     bool msaa_enabled = CVarGetInteger("gMSAAValue", 1) > 1;
 
@@ -609,6 +624,7 @@ void GfxRenderingAPIMetal::SetupScreenFramebuffer(uint32_t width, uint32_t heigh
         tex.texture->release();
 
     tex.texture = mCurrentDrawable->texture();
+    tex.texture->retain(); /* released above next frame, and by the destructor */
 
     MTL::RenderPassDescriptor* render_pass_descriptor = MTL::RenderPassDescriptor::renderPassDescriptor();
     render_pass_descriptor->colorAttachments()->object(0)->setTexture(tex.texture);
@@ -1165,6 +1181,60 @@ bool Metal_IsSupported() {
 
     return count > 0;
 #endif
+}
+
+
+// Re-entry (a game started and stopped several times in one app, e.g. inside
+// the i64 launcher): release everything this backend created, or every
+// restart leaks the GPU objects (pipelines, textures, buffers, command
+// queues). The layer and device are borrowed from SDL's renderer and are not
+// released here. Each object is released once even when two slots share it.
+// (Same as the SpaghettiKart/BattleShip LUS forks, for this backend's members.)
+Fast::GfxRenderingAPIMetal::~GfxRenderingAPIMetal() {
+    std::unordered_set<const void*> released;
+    auto drop = [&](auto*& obj) {
+        if (obj != nullptr && released.insert(obj).second) {
+            obj->release();
+        }
+        obj = nullptr;
+    };
+    for (auto& kv : mShaderProgramPool) {
+        for (auto*& v : kv.second.pipeline_state_variants) {
+            drop(v);
+        }
+    }
+    mShaderProgramPool.clear();
+    mShaderProgram = nullptr;
+    for (auto& t : mTextures) {
+        drop(t.texture);
+        drop(t.msaaTexture);
+        drop(t.sampler);
+    }
+    mTextures.clear();
+    for (auto& fb : mFramebuffers) {
+        fb.mLastShaderProgram = nullptr;
+        drop(fb.mRenderPassDescriptor); /* retained; fb 0's also holds the last drawable */
+        drop(fb.mDepthTexture);
+        drop(fb.mMsaaDepthTexture);
+        delete fb.mScissorRect;
+        fb.mScissorRect = nullptr;
+        delete fb.mViewport;
+        fb.mViewport = nullptr;
+    }
+    mFramebuffers.clear();
+    for (auto*& b : mVertexBufferPool) {
+        drop(b);
+    }
+    drop(mFrameUniformBuffer);
+    drop(mCoordUniformBuffer);
+    drop(mDepthValueOutputBuffer);
+    drop(mDepthComputeFunction);
+    drop(mConvertToRgb5a1Function);
+    drop(mCommandQueue);
+    if (mCurrentDrawable != nullptr) {
+        mCurrentDrawable->release();
+        mCurrentDrawable = nullptr;
+    }
 }
 
 #endif

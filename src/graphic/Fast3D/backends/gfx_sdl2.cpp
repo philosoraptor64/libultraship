@@ -315,6 +315,26 @@ static LRESULT CALLBACK gfx_sdl_wnd_proc(HWND h_wnd, UINT message, WPARAM w_para
 };
 #endif
 
+// A host app (the i64 launcher running this game as a module) can hand in the
+// SDL window to draw into: the backend then neither creates nor destroys it,
+// and never calls SDL_Quit (the host owns SDL). The host keeps the renderer
+// across runs in *sExternalRenderer (memory that survives the module's
+// resets): a new SDL renderer on the same window every run leaves SDL's
+// previous Metal view and its surfaces behind. (Same as the BattleShip and
+// SpaghettiKart LUS forks.)
+static SDL_Window* sExternalWindow = nullptr;
+static void** sExternalRenderer = nullptr;
+static bool sExternalPacing = false;
+extern "C" void LUS_SetExternalWindow(void* sdlWindow, void** rendererCache) {
+    sExternalWindow = static_cast<SDL_Window*>(sdlWindow);
+    sExternalRenderer = rendererCache;
+}
+// The host paces frames (a display link calling the module once per frame):
+// no sleeping to the game's own frame schedule.
+extern "C" void LUS_SetExternalPacing(bool hostPaced) {
+    sExternalPacing = hostPaced;
+}
+
 void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bool startFullScreen, uint32_t width,
                                 uint32_t height, int32_t posX, int32_t posY) {
     mWindowWidth = width;
@@ -374,7 +394,17 @@ void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bo
         flags = flags | SDL_WINDOW_METAL;
     }
 
-    mWnd = SDL_CreateWindow(title, posX, posY, mWindowWidth, mWindowHeight, flags);
+    if (sExternalWindow != nullptr) {
+        mWnd = sExternalWindow;
+        mExternalWindow = true;
+        int w = 0, h = 0;
+        SDL_GetWindowSize(mWnd, &w, &h);
+        mWindowWidth = w;
+        mWindowHeight = h;
+    } else {
+        mExternalWindow = false;
+        mWnd = SDL_CreateWindow(title, posX, posY, mWindowWidth, mWindowHeight, flags);
+    }
 #ifdef _WIN32
     // Get Windows window handle and use it to subclass the window procedure.
     // Needed to circumvent SDLs DPI scaling problems under windows (original does only scale *sometimes*).
@@ -411,7 +441,20 @@ void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bo
         if (mVsyncEnabled) {
             flags |= SDL_RENDERER_PRESENTVSYNC;
         }
-        mRenderer = SDL_CreateRenderer(mWnd, -1, flags);
+        // A window has at most one SDL renderer: another game module that ran
+        // on the host's window before this one keeps its renderer there, so
+        // take that one (any module's cache then points at it).
+        if (mExternalWindow && SDL_GetRenderer(mWnd) != nullptr) {
+            mRenderer = SDL_GetRenderer(mWnd);
+            if (sExternalRenderer != nullptr) {
+                *sExternalRenderer = mRenderer;
+            }
+        } else {
+            mRenderer = SDL_CreateRenderer(mWnd, -1, flags);
+            if (mExternalWindow && sExternalRenderer != nullptr) {
+                *sExternalRenderer = mRenderer;
+            }
+        }
         if (mRenderer == nullptr) {
             SPDLOG_ERROR("Error creating renderer: {}", SDL_GetError());
             return;
@@ -638,6 +681,9 @@ static uint64_t qpc_to_100ns(uint64_t qpc) {
 }
 
 void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
+    if (sExternalPacing) {
+        return;
+    }
     uint64_t t = qpc_to_100ns(SDL_GetPerformanceCounter());
 
     const int64_t next = previous_time + 10 * FRAME_INTERVAL_US_NUMERATOR / FRAME_INTERVAL_US_DENOMINATOR;
@@ -721,6 +767,20 @@ bool GfxWindowBackendSDL2::IsRunning() {
 
 void GfxWindowBackendSDL2::Destroy() {
     // TODO: destroy _any_ resources used by SDL
+    if (mExternalWindow) {
+        // the host's window, renderer (kept for the next run) and SDL stay
+        if (mCtx) {
+            SDL_GL_DeleteContext(mCtx);
+        }
+        if (mRenderer && sExternalRenderer == nullptr) {
+            SDL_DestroyRenderer(mRenderer);
+        }
+        mCtx = nullptr;
+        mRenderer = nullptr;
+        mWnd = nullptr;
+        mExternalWindow = false;
+        return;
+    }
     SDL_GL_DeleteContext(mCtx);
     SDL_DestroyWindow(mWnd);
     SDL_DestroyRenderer(mRenderer);

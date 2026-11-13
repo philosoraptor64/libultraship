@@ -1,14 +1,32 @@
 #include "SDLAudioPlayer.h"
 #include <spdlog/spdlog.h>
 
+// A host app (i64) plays the game's audio itself (the game hands its samples to
+// the host): no audio device or SDL audio subsystem of the game's own.
+static bool sExternalAudio = false;
+extern "C" void LUS_SetExternalAudio(bool external) {
+    sExternalAudio = external;
+}
+
 namespace Ship {
 
 SDLAudioPlayer::~SDLAudioPlayer() {
     SPDLOG_TRACE("destruct SDL audio player");
-    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    if (mDevice != 0) {
+        SDL_CloseAudioDevice(mDevice);
+        mDevice = 0;
+    }
+    if (!mExternal) {
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    }
 }
 
 bool SDLAudioPlayer::DoInit() {
+    mExternal = sExternalAudio;
+    if (mExternal) {
+        mNumChannels = 2;
+        return true;
+    }
     if (SDL_Init(SDL_INIT_AUDIO) != 0) {
         SPDLOG_ERROR("SDL init error: %s\n", SDL_GetError());
         return false;
@@ -31,10 +49,16 @@ bool SDLAudioPlayer::DoInit() {
 }
 
 int SDLAudioPlayer::Buffered() {
+    if (mExternal) {
+        return 0;
+    }
     return SDL_GetQueuedAudioSize(mDevice) / (sizeof(int16_t) * mNumChannels);
 }
 
 void SDLAudioPlayer::Play(const uint8_t* buf, size_t len) {
+    if (mExternal) {
+        return;
+    }
     if (Buffered() < 6000) {
         // Don't fill the audio buffer too much in case this happens
         SDL_QueueAudio(mDevice, buf, len);
