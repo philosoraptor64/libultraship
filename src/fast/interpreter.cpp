@@ -1774,6 +1774,7 @@ void Interpreter::ImportTextureRgba16(int tile, bool importReplacement) {
 
     uint32_t i = 0;
 
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t clrIdx = (y * (fullImageLineSizeBytes / 2)) + (x);
@@ -1808,6 +1809,7 @@ void Interpreter::ImportTextureRgba16(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -1853,6 +1855,7 @@ void Interpreter::ImportTextureRgba32(int tile, bool importReplacement) {
     // Copy pixel by pixel, respecting full image stride (handles sub-tile loads)
     uint32_t fullImageStridePixels = full_image_line_size_bytes / 4;
     uint32_t i = 0;
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t srcIdx = y * fullImageStridePixels + x;
@@ -1875,6 +1878,7 @@ void Interpreter::ImportTextureRgba32(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -1916,6 +1920,7 @@ void Interpreter::ImportTextureIA4(int tile, bool importReplacement) {
                                             mRdp->texture_tile[tile].lrs);
 
     uint32_t i = 0;
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t srcPixelIdx = y * (fullImageLineSizeBytes * 2) + x;
@@ -1943,6 +1948,7 @@ void Interpreter::ImportTextureIA4(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -1975,6 +1981,7 @@ void Interpreter::ImportTextureIA8(int tile, bool importReplacement) {
                                             mRdp->texture_tile[tile].lrs);
 
     uint32_t i = 0;
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t srcIdx = y * fullImageLineSizeBytes + x;
@@ -2000,6 +2007,7 @@ void Interpreter::ImportTextureIA8(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -2032,6 +2040,7 @@ void Interpreter::ImportTextureIA16(int tile, bool importReplacement) {
 
     uint32_t i = 0;
 
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t clrIdx = (y * (full_image_line_size_bytes / 2)) + (x);
@@ -2062,6 +2071,7 @@ void Interpreter::ImportTextureIA16(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -2097,6 +2107,7 @@ void Interpreter::ImportTextureI4(int tile, bool importReplacement) {
 
     uint32_t i = 0;
 
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t clrIdx = (y * (fullImageLineSizeBytes * 2)) + (x);
@@ -2129,6 +2140,7 @@ void Interpreter::ImportTextureI4(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -2158,6 +2170,7 @@ void Interpreter::ImportTextureI8(int tile, bool importReplacement) {
     }
 
     uint32_t i = 0;
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint8_t intensity = addr[y * fullImageLineSizeBytes + x];
@@ -2181,6 +2194,7 @@ void Interpreter::ImportTextureI8(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -2260,6 +2274,7 @@ void Interpreter::ImportTextureCi4(int tile, bool importReplacement) {
     }
 
     uint32_t i = 0;
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t srcPixelIdx = y * (fullImageLineSizeBytes * 2) + x;
@@ -2291,6 +2306,7 @@ void Interpreter::ImportTextureCi4(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -2369,6 +2385,7 @@ void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
     }
 
     uint32_t i = 0;
+    EnsureTexUploadBuffer((size_t) sizeBytes * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint8_t idx = addr[y * fullImageLineSizeBytes + x];
@@ -2399,6 +2416,7 @@ void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
             }
         }
     }
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -2489,6 +2507,7 @@ void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
     }
 
     // Safely only copy the amount of bytes the resource can allow
+    EnsureTexUploadBuffer(std::max<size_t>(numLoadedBytes, (size_t) safeLoadedBytes + safeLineSizeBytes)); /* grows on demand (was 256 MB up front) */
     for (uint32_t i = 0, j = 0; i < safeLoadedBytes; i += safeLineSizeBytes, j += safeFullImageLineSizeBytes) {
         memcpy(mTexUploadBuffer + i, addr + j, safeLineSizeBytes);
     }
@@ -2813,6 +2832,7 @@ void Interpreter::ImportTextureMask(int i, int tile) {
             break;
     }
 
+    EnsureTexUploadBuffer((size_t) width * height * 4); /* grows on demand (was 256 MB up front) */
     for (uint32_t texIndex = 0; texIndex < width * height; texIndex++) {
         uint8_t masked = orig_addr[texIndex];
         if (masked) {
@@ -2828,6 +2848,7 @@ void Interpreter::ImportTextureMask(int i, int tile) {
         }
     }
 
+    EnsureTexUploadBuffer((size_t) width * height * 4);
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
@@ -7046,11 +7067,7 @@ void Interpreter::Init(class GfxWindowBackend* wapi, class GfxRenderingAPI* rapi
         mSegmentPointers[i] = 0;
     }
 
-    if (mTexUploadBuffer == nullptr) {
-        // We cap texture max to 8k, because why would you need more?
-        int max_tex_size = std::min(8192, mRapi->GetMaxTextureSize());
-        mTexUploadBuffer = (uint8_t*)malloc(max_tex_size * max_tex_size * 4);
-    }
+    /* mTexUploadBuffer grows on demand (EnsureTexUploadBuffer) */
 
     ucode_handler_index = UcodeHandlers::ucode_f3dex2;
 
@@ -7061,6 +7078,8 @@ void Interpreter::Init(class GfxWindowBackend* wapi, class GfxRenderingAPI* rapi
 void Interpreter::Destroy() {
     // TODO: should also destroy rapi, and any other resources acquired in fast3d
     free(mTexUploadBuffer);
+    mTexUploadBuffer = nullptr;
+    mTexUploadCapacity = 0;
     mWapi->Destroy();
 
     // Texture cache and loaded textures store references to Resources which need to be unreferenced.
@@ -7798,4 +7817,22 @@ extern "C" void gfx_texture_cache_clear() {
 
 extern "C" void gfx_register_hires_hook(GfxHiResHookFn callback) {
     Fast::gHiResHook = callback;
+}
+
+/* i64: the upload buffer used to be 8192 x 8192 x 4 = 256 MB, allocated at Init; N64 textures need a few KB and
+ * the address space is scarce inside i64 on iOS 27. realloc keeps the contents, so it may also grow mid-texture. */
+void Fast::Interpreter::EnsureTexUploadBuffer(size_t bytes) {
+    if (bytes <= mTexUploadCapacity) {
+        return;
+    }
+    size_t cap = mTexUploadCapacity ? mTexUploadCapacity : ((size_t) 1 << 20);
+    while (cap < bytes) {
+        cap *= 2;
+    }
+    uint8_t* p = (uint8_t*) realloc(mTexUploadBuffer, cap);
+    if (p == nullptr) {
+        abort();
+    }
+    mTexUploadBuffer = p;
+    mTexUploadCapacity = cap;
 }

@@ -1,6 +1,9 @@
 #define NOMINMAX
 
 #include "ship/window/gui/Gui.h"
+#if defined(__APPLE__)
+#include "n64_bigblock.h"
+#endif
 
 #include <cstring>
 #include <utility>
@@ -92,8 +95,25 @@ Gui::~Gui() {
     SPDLOG_TRACE("destruct gui");
 }
 
+#if defined(__APPLE__)
+// ImGui's big blocks (the font atlas) straight from the system, so freeing them gives the memory back: the system
+// allocator keeps freed large blocks until the process exits (n64_bigblock.h; i64).
+static void* GuiImAlloc(size_t n, void*) {
+    void* p = n64_big_alloc(n);
+    return p ? p : malloc(n);
+}
+static void GuiImFree(void* p, void*) {
+    if (!n64_big_free(p)) {
+        free(p);
+    }
+}
+#endif
+
 void Gui::Init(GuiWindowInitData windowImpl) {
     mImpl = windowImpl;
+#if defined(__APPLE__)
+    ImGui::SetAllocatorFunctions(GuiImAlloc, GuiImFree, nullptr);
+#endif
     ImGuiContext* ctx = ImGui::CreateContext();
     ImGui::SetCurrentContext(ctx);
     mImGuiIo = &ImGui::GetIO();
@@ -595,6 +615,12 @@ void Gui::HandleMouseCapture() {
 void Gui::StartFrame() {
     HandleMouseCapture();
     ImGuiBackendNewFrame();
+    // The backend has the font atlas on the GPU now: drop the CPU copy (Mario Kart's atlas is 4096 x 4096, 80 MB
+    // with its alpha copy; inside i64 that stayed in the app's footprint after the game). ImGui rebuilds it if the
+    // fonts change.
+    if (mImGuiIo->Fonts->TexID && (mImGuiIo->Fonts->TexPixelsRGBA32 || mImGuiIo->Fonts->TexPixelsAlpha8)) {
+        mImGuiIo->Fonts->ClearTexData();
+    }
     ImGuiWMNewFrame();
     ImGui::NewFrame();
 }
