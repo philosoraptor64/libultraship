@@ -140,12 +140,74 @@ void Interpreter::Flush() {
     }
 }
 
+/* Shader pre-warm (i64): a combiner seen for the first time compiles its Metal library mid-frame (a stutter).
+ * Every pair ever created is remembered in <app dir>/shaders.list and compiled at the top of the first frame.
+ * LUS_NOSHADERWARM=1 turns it off. */
+static constexpr const char* kShaderListHeader = "lus-shaders v1";
+static constexpr size_t kShaderListMax = 2048;
+
+std::string Interpreter::ShaderListPath() {
+    return Ship::Context::GetPathRelativeToAppDirectory("shaders.list");
+}
+
+void Interpreter::ShaderListRecord(uint64_t id0, uint64_t id1) {
+    if (mShaderListOff || mShaderListKnown.size() >= kShaderListMax ||
+        !mShaderListKnown.insert(std::make_pair(id0, id1)).second) {
+        return;
+    }
+    const std::string path = ShaderListPath();
+    FILE* f = fopen(path.c_str(), "a");
+    if (f == nullptr) {
+        mShaderListOff = true;
+        return;
+    }
+    if (ftell(f) == 0) {
+        fprintf(f, "%s\n", kShaderListHeader);
+    }
+    fprintf(f, "%016llx %016llx\n", (unsigned long long) id0, (unsigned long long) id1);
+    fclose(f);
+}
+
+void Interpreter::ShaderPrewarm() {
+    mShaderPrewarmDone = true;
+    if (getenv("LUS_NOSHADERWARM")) {
+        mShaderListOff = true;
+        return;
+    }
+    const std::string path = ShaderListPath();
+    FILE* f = fopen(path.c_str(), "r");
+    if (f == nullptr) {
+        return;
+    }
+    char line[96];
+    bool ok = fgets(line, sizeof line, f) && strncmp(line, kShaderListHeader, strlen(kShaderListHeader)) == 0;
+    int compiled = 0;
+    while (ok && mShaderListKnown.size() < kShaderListMax && fgets(line, sizeof line, f)) {
+        unsigned long long id0, id1;
+        if (sscanf(line, "%llx %llx", &id0, &id1) != 2) {
+            continue;
+        }
+        mShaderListKnown.insert(std::make_pair((uint64_t) id0, (uint64_t) id1));
+        if (mRapi->LookupShader(id0, id1) == nullptr) {
+            mRapi->CreateAndLoadNewShader(id0, id1);
+            compiled++;
+        }
+    }
+    fclose(f);
+    if (!ok) {
+        remove(path.c_str()); /* foreign or corrupt: start a fresh list */
+    }
+    mRenderingState.mShaderProgram = nullptr; /* the first draw loads its own shader */
+    SPDLOG_INFO("shader pre-warm: {} compiled from {}", compiled, path);
+}
+
 ShaderProgram* Interpreter::LookupOrCreateShaderProgram(uint64_t id0, uint64_t id1) {
     ShaderProgram* prg = mRapi->LookupShader(id0, id1);
     if (prg == nullptr) {
         mRapi->UnloadShader(mRenderingState.mShaderProgram);
         prg = mRapi->CreateAndLoadNewShader(id0, id1);
         mRenderingState.mShaderProgram = prg;
+        ShaderListRecord(id0, id1);
     }
     return prg;
 }
@@ -4325,6 +4387,9 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     mGetPixelDepthCached.clear();
 
     mCurMtxReplacements = &mtx_replacements;
+    if (!mShaderPrewarmDone) {
+        ShaderPrewarm();
+    }
 
     mRapi->UpdateFramebufferParameters(0, mGfxCurrentWindowDimensions.width, mGfxCurrentWindowDimensions.height, 1,
                                        false, true, true, !mRendersToFb);
