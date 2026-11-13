@@ -8,6 +8,17 @@
 #ifdef __APPLE__
 
 #include <unordered_set>
+#include <atomic>
+/* i64: one picture of the screen for the launcher (n64_host.offer_title_art). The module sets the callback and
+ * raises the request; the next readable frame is copied, converted to RGBA and handed over (on the render thread). */
+extern "C" {
+void (*gLusFrameCaptureCallback)(const uint8_t* rgba, uint32_t w, uint32_t h) = nullptr;
+std::atomic<int> gLusFrameCaptureRequest{ 0 };
+}
+static int sCapturePhase = 0; /* 0 idle, 1 waiting for a readable drawable, 2 copy queued this frame */
+static int sCaptureWaitFrames = 0;
+static void* sCaptureBufAny = nullptr;
+static uint32_t sCaptureW = 0, sCaptureH = 0;
 #include "fast/backends/gfx_metal.h"
 
 #include <vector>
@@ -723,9 +734,51 @@ void GfxRenderingAPIMetal::EndFrame() {
 
     auto screen_framebuffer = mFramebuffers[0];
     screen_framebuffer.mCommandEncoder->endEncoding();
+    if (gLusFrameCaptureRequest.load(std::memory_order_relaxed) && gLusFrameCaptureCallback && sCapturePhase != 2) {
+        MTL::Texture* t = mCurrentDrawable->texture();
+        if (!t->framebufferOnly()) {
+            sCaptureW = (uint32_t) t->width();
+            sCaptureH = (uint32_t) t->height();
+            MTL::Buffer* buf = mDevice->newBuffer((size_t) sCaptureW * 4 * sCaptureH, MTL::ResourceStorageModeShared);
+            sCaptureBufAny = buf;
+            MTL::BlitCommandEncoder* blit = screen_framebuffer.mCommandBuffer->blitCommandEncoder();
+            blit->copyFromTexture(t, 0, 0, MTL::Origin(0, 0, 0), MTL::Size(sCaptureW, sCaptureH, 1), buf, 0,
+                                  (size_t) sCaptureW * 4, (size_t) sCaptureW * 4 * sCaptureH);
+            blit->endEncoding();
+            sCapturePhase = 2;
+        } else if (sCapturePhase == 0) {
+            mLayer->setFramebufferOnly(false); /* readable drawables from now until the copy */
+            sCapturePhase = 1;
+            sCaptureWaitFrames = 0;
+        } else if (++sCaptureWaitFrames > 30) {
+            gLusFrameCaptureRequest = 0; /* never got a readable drawable: give up */
+            mLayer->setFramebufferOnly(true);
+            sCapturePhase = 0;
+        }
+    }
     screen_framebuffer.mCommandBuffer->presentDrawable(mCurrentDrawable);
     mCurrentVertexBufferPoolIndex = (mCurrentVertexBufferPoolIndex + 1) % kMaxVertexBufferPoolSize;
     screen_framebuffer.mCommandBuffer->commit();
+    if (sCapturePhase == 2) {
+        screen_framebuffer.mCommandBuffer->waitUntilCompleted(); /* once, for the launcher's picture */
+        MTL::Buffer* buf = (MTL::Buffer*) sCaptureBufAny;
+        std::vector<uint8_t> rgba((size_t) sCaptureW * sCaptureH * 4);
+        const uint8_t* src = (const uint8_t*) buf->contents();
+        for (size_t k = 0; k < (size_t) sCaptureW * sCaptureH; k++) {
+            rgba[4 * k + 0] = src[4 * k + 2];
+            rgba[4 * k + 1] = src[4 * k + 1];
+            rgba[4 * k + 2] = src[4 * k + 0];
+            rgba[4 * k + 3] = 255;
+        }
+        buf->release();
+        sCaptureBufAny = nullptr;
+        gLusFrameCaptureRequest = 0;
+        sCapturePhase = 0;
+        mLayer->setFramebufferOnly(true);
+        if (gLusFrameCaptureCallback) {
+            gLusFrameCaptureCallback(rgba.data(), sCaptureW, sCaptureH);
+        }
+    }
 
     mDrawnFramebuffers.clear();
 
