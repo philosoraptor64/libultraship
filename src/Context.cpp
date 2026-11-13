@@ -464,6 +464,10 @@ std::string Context::GetAppDirectoryPath(std::string appName) {
 #endif
 
 #ifdef __IOS__
+    // a host app (i64) gives the game module its own data folder
+    if (const char* ship = std::getenv("SHIP_HOME"); ship != nullptr && ship[0] != '\0') {
+        return std::string(ship);
+    }
     const char* home = getenv("HOME");
     return std::string(home) + "/Documents";
 #endif
