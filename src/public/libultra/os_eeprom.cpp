@@ -1,4 +1,8 @@
 #include "libultraship/libultraship.h"
+#include <cstdio>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 extern "C" {
 
@@ -35,13 +39,39 @@ int32_t osEepromLongWrite(OSMesgQueue* mq, uint8_t address, uint8_t* buffer, int
     }
     memcpy(content + address * 8, buffer, length);
 
+    // Written to a temporary file that then replaces the save in one step (rename): if the
+    // app is stopped mid-write (a crash, iOS ending it, a dropped online match), the old save
+    // stays whole. Writing it in place could leave it empty, and the next partial write
+    // would then fill the rest of the save with zeros.
     const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory("default.sav");
-    FILE* fp = fopen(save_file.c_str(), "wb");
+    const std::string tmp_file = save_file + ".tmp";
+    FILE* fp = fopen(tmp_file.c_str(), "wb");
     if (fp == NULL) {
         return -1;
     }
     s32 ret = fwrite(content, 1, 512, fp) == 512 ? 0 : -1;
-    fclose(fp);
+    if (fflush(fp) != 0) {
+        ret = -1;
+    }
+#ifndef _WIN32
+    if (ret == 0 && fsync(fileno(fp)) != 0) {
+        ret = -1;
+    }
+#endif
+    if (fclose(fp) != 0) {
+        ret = -1;
+    }
+#ifdef _WIN32
+    if (ret == 0) {
+        remove(save_file.c_str()); // rename doesn't replace an existing file on Windows
+    }
+#endif
+    if (ret == 0 && rename(tmp_file.c_str(), save_file.c_str()) != 0) {
+        ret = -1;
+    }
+    if (ret != 0) {
+        remove(tmp_file.c_str());
+    }
     return ret;
 }
 
