@@ -746,6 +746,23 @@ void GfxRenderingAPIMetal::EndFrame() {
                                   (size_t) sCaptureW * 4, (size_t) sCaptureW * 4 * sCaptureH);
             blit->endEncoding();
             sCapturePhase = 2;
+            {
+                MTL::Buffer* capBuf = (MTL::Buffer*) sCaptureBufAny;
+                const uint32_t cw = sCaptureW, ch = sCaptureH;
+                auto cb = gLusFrameCaptureCallback;
+                screen_framebuffer.mCommandBuffer->addCompletedHandler([capBuf, cw, ch, cb](MTL::CommandBuffer*) {
+                    std::vector<uint8_t> rgba((size_t) cw * ch * 4);
+                    const uint8_t* src = (const uint8_t*) capBuf->contents();
+                    for (size_t k = 0; k < (size_t) cw * ch; k++) {
+                        rgba[4 * k + 0] = src[4 * k + 2];
+                        rgba[4 * k + 1] = src[4 * k + 1];
+                        rgba[4 * k + 2] = src[4 * k + 0];
+                        rgba[4 * k + 3] = 255;
+                    }
+                    capBuf->release();
+                    if (cb) cb(rgba.data(), cw, ch);
+                });
+            }
         } else if (sCapturePhase == 0) {
             mLayer->setFramebufferOnly(false); /* readable drawables from now until the copy */
             sCapturePhase = 1;
@@ -759,25 +776,13 @@ void GfxRenderingAPIMetal::EndFrame() {
     screen_framebuffer.mCommandBuffer->presentDrawable(mCurrentDrawable);
     mCurrentVertexBufferPoolIndex = (mCurrentVertexBufferPoolIndex + 1) % kMaxVertexBufferPoolSize;
     screen_framebuffer.mCommandBuffer->commit();
-    if (sCapturePhase == 2) {
-        screen_framebuffer.mCommandBuffer->waitUntilCompleted(); /* once, for the launcher's picture */
-        MTL::Buffer* buf = (MTL::Buffer*) sCaptureBufAny;
-        std::vector<uint8_t> rgba((size_t) sCaptureW * sCaptureH * 4);
-        const uint8_t* src = (const uint8_t*) buf->contents();
-        for (size_t k = 0; k < (size_t) sCaptureW * sCaptureH; k++) {
-            rgba[4 * k + 0] = src[4 * k + 2];
-            rgba[4 * k + 1] = src[4 * k + 1];
-            rgba[4 * k + 2] = src[4 * k + 0];
-            rgba[4 * k + 3] = 255;
-        }
-        buf->release();
-        sCaptureBufAny = nullptr;
+    if (sCapturePhase == 2) { /* the copy finishes on Metal's completion thread (CaptureDone); no wait here */
         gLusFrameCaptureRequest = 0;
         sCapturePhase = 0;
-        mLayer->setFramebufferOnly(true);
-        if (gLusFrameCaptureCallback) {
-            gLusFrameCaptureCallback(rgba.data(), sCaptureW, sCaptureH);
-        }
+#ifdef __IOS__
+        if (!getenv("LUS_PIXEL_DIAG"))
+#endif
+            mLayer->setFramebufferOnly(true);
     }
 
     mDrawnFramebuffers.clear();
