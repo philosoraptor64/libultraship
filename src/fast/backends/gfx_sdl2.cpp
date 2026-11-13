@@ -805,6 +805,12 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
     previous_time = t;
 }
 
+/* i64: set by the game module when the host paces frames (N64_LAUNCH_HOST_PACED); then LUS doesn't sleep to its
+ * own frame grid (two clocks: start-up frames waited up to 117 ms in Smash). */
+extern "C" {
+bool gLusHostPaced = false;
+}
+
 void GfxWindowBackendSDL2::SwapBuffersBegin() {
     bool nextVsyncEnabled = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_VSYNC_ENABLED, 1);
 
@@ -814,7 +820,9 @@ void GfxWindowBackendSDL2::SwapBuffersBegin() {
         SDL_RenderSetVSync(mRenderer, mVsyncEnabled ? 1 : 0);
     }
 
-    SyncFramerateWithTime();
+    if (!gLusHostPaced) { /* inside i64 the host paces the frames (its display link): no second clock */
+        SyncFramerateWithTime();
+    }
     SDL_GL_SwapWindow(mWnd);
 }
 
