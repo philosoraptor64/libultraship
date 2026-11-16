@@ -102,6 +102,12 @@ int32_t osContStartReadData(OSMesgQueue* mesg) {
     return 0;
 }
 
+// A host that owns the controllers (the i64 launcher) gives each port's state here instead of the ControlDeck:
+// returns 0 for a port without a controller (then nothing is pressed on it). nullptr = the ControlDeck as usual.
+extern "C" {
+int (*gLusHostPadRead)(int port, uint16_t* button, int8_t* stick_x, int8_t* stick_y) = nullptr;
+}
+
 void osContGetReadData(OSContPad* pad) {
     /* `OSContPad` means two different layouts in the same build: the
      * LUS struct (0x24 bytes, with gyro/right-stick for OOT/MM) and the
@@ -132,6 +138,17 @@ void osContGetReadData(OSContPad* pad) {
         out[i].stick_x = lus_pads[i].stick_x;
         out[i].stick_y = lus_pads[i].stick_y;
         out[i].err_no  = lus_pads[i].err_no;
+        if (gLusHostPadRead != nullptr) {
+            uint16_t b = 0;
+            int8_t x = 0, y = 0;
+            if (!gLusHostPadRead(i, &b, &x, &y)) {
+                b = 0;
+                x = y = 0;
+            }
+            out[i].button = b;
+            out[i].stick_x = x;
+            out[i].stick_y = y;
+        }
     }
 }
 
