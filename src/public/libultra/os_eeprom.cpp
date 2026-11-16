@@ -6,6 +6,12 @@
 
 extern "C" {
 
+// The save file's name in the app folder: "default.sav", or SHIP_SAVE_FILE (the host may give a run a save of its own)
+static std::string SaveFileName() {
+    const char* name = getenv("SHIP_SAVE_FILE");
+    return (name != nullptr && name[0] != '\0') ? name : "default.sav";
+}
+
 int32_t osEepromProbe(OSMesgQueue* mq) {
     return EEPROM_TYPE_4K;
 }
@@ -14,7 +20,7 @@ int32_t osEepromLongRead(OSMesgQueue* mq, uint8_t address, uint8_t* buffer, int3
     u8 content[512];
     s32 ret = -1;
 
-    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory("default.sav");
+    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory(SaveFileName());
     FILE* fp = fopen(save_file.c_str(), "rb");
     if (fp == NULL) {
         return -1;
@@ -43,7 +49,7 @@ int32_t osEepromLongWrite(OSMesgQueue* mq, uint8_t address, uint8_t* buffer, int
     // app is stopped mid-write (a crash, iOS ending it, a dropped online match), the old save
     // stays whole. Writing it in place could leave it empty, and the next partial write
     // would then fill the rest of the save with zeros.
-    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory("default.sav");
+    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory(SaveFileName());
     const std::string tmp_file = save_file + ".tmp";
     FILE* fp = fopen(tmp_file.c_str(), "wb");
     if (fp == NULL) {
