@@ -38,10 +38,30 @@ int32_t osContStartReadData(OSMesgQueue* mesg) {
     return 0;
 }
 
+// A host that owns the controllers (the i64 launcher) gives each port's buttons and stick here instead of the
+// ControlDeck: returns 0 for a port without a controller (then nothing is pressed on it). nullptr = the
+// ControlDeck as usual.
+extern "C" {
+int (*gLusHostPadRead)(int port, uint16_t* button, int8_t* stick_x, int8_t* stick_y) = nullptr;
+}
+
 void osContGetReadData(OSContPad* pad) {
     memset(pad, 0, sizeof(OSContPad) * __osMaxControllers);
 
     Ship::Context::GetInstance()->GetControlDeck()->WriteToPad(pad);
+    if (gLusHostPadRead != nullptr) {
+        for (int i = 0; i < __osMaxControllers; i++) {
+            uint16_t b = 0;
+            int8_t x = 0, y = 0;
+            if (!gLusHostPadRead(i, &b, &x, &y)) {
+                b = 0;
+                x = y = 0;
+            }
+            pad[i].button = b;
+            pad[i].stick_x = x;
+            pad[i].stick_y = y;
+        }
+    }
 }
 
 void osSetTime(OSTime time) {
