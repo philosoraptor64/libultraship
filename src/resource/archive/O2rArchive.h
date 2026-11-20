@@ -4,6 +4,8 @@
 
 #include <string>
 #include <stdint.h>
+#include <mutex>
+#include <vector>
 #include <string>
 
 #include "zip.h"
@@ -28,6 +30,14 @@ class O2rArchive final : virtual public Archive {
     std::shared_ptr<File> LoadFile(uint64_t hash);
 
   private:
-    zip_t* mZipArchive;
+    // libzip handles are not thread-safe: the game thread, the audio thread and LUS's loader threads each read
+    // through a handle of their own, taken from this pool (as upstream libultraship does)
+    zip_t* GetZipHandle();
+    void ReleaseZipHandle(zip_t* handle);
+    void ClosePool();
+
+    zip_t* mZipArchive = nullptr;
+    std::mutex mPoolMutex;
+    std::vector<zip_t*> mZipArchivePool;
 };
 } // namespace Ship

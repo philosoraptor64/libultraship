@@ -13,6 +13,34 @@ O2rArchive::~O2rArchive() {
     Close();
 }
 
+zip_t* O2rArchive::GetZipHandle() {
+    {
+        std::lock_guard<std::mutex> lock(mPoolMutex);
+        if (!mZipArchivePool.empty()) {
+            zip_t* handle = mZipArchivePool.back();
+            mZipArchivePool.pop_back();
+            return handle;
+        }
+    }
+    return zip_open(GetPath().c_str(), ZIP_RDONLY, nullptr);
+}
+
+void O2rArchive::ReleaseZipHandle(zip_t* handle) {
+    if (handle == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mPoolMutex);
+    mZipArchivePool.push_back(handle);
+}
+
+void O2rArchive::ClosePool() {
+    std::lock_guard<std::mutex> lock(mPoolMutex);
+    for (auto* handle : mZipArchivePool) {
+        zip_close(handle);
+    }
+    mZipArchivePool.clear();
+}
+
 std::shared_ptr<File> O2rArchive::LoadFile(uint64_t hash) {
     const std::string& filePath =
         *Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToString(hash);
@@ -24,29 +52,38 @@ std::shared_ptr<File> O2rArchive::LoadFile(const std::string& filePath) {
         SPDLOG_TRACE("Failed to open file {} from zip archive {}. Archive not open.", filePath, GetPath());
         return nullptr;
     }
+    zip_t* zipArchive = GetZipHandle();
+    if (zipArchive == nullptr) {
+        SPDLOG_ERROR("Failed to open zip file \"{}\" for reading {}", GetPath(), filePath);
+        return nullptr;
+    }
 
-    auto zipEntryIndex = zip_name_locate(mZipArchive, filePath.c_str(), 0);
+    auto zipEntryIndex = zip_name_locate(zipArchive, filePath.c_str(), 0);
     if (zipEntryIndex < 0) {
         SPDLOG_TRACE("Failed to find file {} in zip archive  {}.", filePath, GetPath());
+        ReleaseZipHandle(zipArchive);
         return nullptr;
     }
 
     struct zip_stat zipEntryStat;
     zip_stat_init(&zipEntryStat);
-    if (zip_stat_index(mZipArchive, zipEntryIndex, 0, &zipEntryStat) != 0) {
+    if (zip_stat_index(zipArchive, zipEntryIndex, 0, &zipEntryStat) != 0) {
         SPDLOG_TRACE("Failed to get entry information for file {} in zip archive  {}.", filePath, GetPath());
+        ReleaseZipHandle(zipArchive);
         return nullptr;
     }
 
     // Filesize 0, no logging needed
     if (zipEntryStat.size == 0) {
         SPDLOG_TRACE("Failed to load file {}; filesize 0", filePath, GetPath());
+        ReleaseZipHandle(zipArchive);
         return nullptr;
     }
 
-    struct zip_file* zipEntryFile = zip_fopen_index(mZipArchive, zipEntryIndex, 0);
+    struct zip_file* zipEntryFile = zip_fopen_index(zipArchive, zipEntryIndex, 0);
     if (!zipEntryFile) {
         SPDLOG_TRACE("Failed to open file {} in zip archive  {}.", filePath, GetPath());
+        ReleaseZipHandle(zipArchive);
         return nullptr;
     }
 
@@ -60,6 +97,8 @@ std::shared_ptr<File> O2rArchive::LoadFile(const std::string& filePath) {
     if (zip_fclose(zipEntryFile) != 0) {
         SPDLOG_TRACE("Error closing file {} in zip archive  {}.", filePath, GetPath());
     }
+
+    ReleaseZipHandle(zipArchive);
 
     fileToLoad->IsLoaded = true;
 
@@ -90,6 +129,7 @@ bool O2rArchive::Open() {
 }
 
 bool O2rArchive::Close() {
+    ClosePool();
     if (mZipArchive == nullptr) {
         SPDLOG_ERROR("Cannot close zip file. Zip file not loaded. \"{}\"", GetPath());
         return false;
@@ -99,6 +139,7 @@ bool O2rArchive::Close() {
         SPDLOG_ERROR("Failed to close zip file \"{}\"", GetPath());
         return false;
     }
+    mZipArchive = nullptr;
 
     return true;
 }
@@ -133,6 +174,7 @@ bool O2rArchive::WriteFile(const std::string& filePath, const std::vector<uint8_
     }
 
     SPDLOG_INFO("Successfully wrote file: {}", filePath);
+    ClosePool();   // the file on disk changed: the pooled handles are stale
 
     // Reopen the zip file so that it may continued to be used by libultraship
     mZipArchive = zip_open(GetPath().c_str(), ZIP_CREATE, nullptr);
